@@ -1,0 +1,8 @@
+# Ignore the database file
+database/artifacts.db
+
+# Ignore Python's cache folders
+__pycache__/
+
+# Ignore a virtual environment folder if you create one
+venv/
