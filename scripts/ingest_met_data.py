@@ -1,64 +1,85 @@
-# Import the necessary libraries
 import requests
-import sqlite3 # New: Import the SQLite library
+import sqlite3
+import time # New: Import the time library to pause between requests
 
 # --- CONFIGURATION ---
-OBJECT_ID = 466112
-API_URL = f"https://collectionapi.metmuseum.org/public/collection/v1/objects/{OBJECT_ID}"
-DB_FILE = "database/artifacts.db" # New: Add path to your database file
+DB_FILE = "database/artifacts.db"
+# New: Define the Search API URL and our search term
+SEARCH_TERM = "Greek Art"
+SEARCH_API_URL = f"https://collectionapi.metmuseum.org/public/collection/v1/search?q={SEARCH_TERM}"
+OBJECT_API_BASE_URL = "https://collectionapi.metmuseum.org/public/collection/v1/objects/"
 
 # --- SCRIPT EXECUTION ---
-print(f"Attempting to fetch data for object ID: {OBJECT_ID}...")
 try:
-    # 1. Make the API request (same as Day 2)
-    response = requests.get(API_URL)
-    response.raise_for_status()
-    data = response.json()
-    print("✅ Success! API data fetched.")
-
-    # 2. Extract the relevant data
-    title = data.get('title')
-    culture = data.get('culture')
-    creation_date = data.get('objectDate')
-    image_path = data.get('primaryImageSmall')
-    description = data.get('objectName') # Using objectName as a simple description
+    # 1. New: Search for objects to get a list of IDs
+    print(f"Searching for objects with term: '{SEARCH_TERM}'...")
+    search_response = requests.get(SEARCH_API_URL)
+    search_response.raise_for_status()
+    search_data = search_response.json()
     
-    # New: Don't proceed if essential data is missing
-    if not all([title, culture, image_path]):
-        print("❌ Missing essential data, skipping database insert.")
+    object_ids = search_data.get('objectIDs')
+    if not object_ids:
+        print("No objects found for this search term.")
     else:
-        # 3. Connect to the SQLite database
-        print("Connecting to the database...")
+        # Let's limit to the first 50 objects to not overload the API or our DB
+        object_ids_to_fetch = object_ids[:50] 
+        print(f"Found {len(object_ids)} objects. Fetching details for the first {len(object_ids_to_fetch)}.")
+
+        # 2. Connect to the database (once, before the loop)
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
 
-        # 4. Insert Provenance (Culture) if it doesn't exist
-        # We check if the culture is already in the Provenances table to avoid duplicates.
-        cursor.execute("SELECT ProvenanceID FROM Provenances WHERE Name = ?", (culture,))
-        result = cursor.fetchone()
-        
-        if result:
-            provenance_id = result[0]
-        else:
-            # If not found, insert it and get the new ID
-            cursor.execute("INSERT INTO Provenances (Name) VALUES (?)", (culture,))
-            provenance_id = cursor.lastrowid
-            print(f"   - Added new provenance: '{culture}' with ID: {provenance_id}")
+        # 3. New: Loop through each object ID
+        for object_id in object_ids_to_fetch:
+            print(f"\n--- Fetching Object ID: {object_id} ---")
+            object_api_url = f"{OBJECT_API_BASE_URL}{object_id}"
+            
+            # This inner try/except handles errors for a single object
+            try:
+                obj_response = requests.get(object_api_url)
+                obj_response.raise_for_status()
+                data = obj_response.json()
 
-        # 5. Insert the Artifact data
-        # We use the provenance_id we just found or created.
-        cursor.execute("""
-            INSERT INTO Artifacts (Title, ObjectType, ProvenanceID, CreationDate, ImageFilePath, Description)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (title, description, provenance_id, creation_date, image_path, "Fetched from The Met API"))
-        
-        # 6. Commit changes and close the connection
+                # Extract data (same as Day 3)
+                title = data.get('title')
+                culture = data.get('culture')
+                creation_date = data.get('objectDate')
+                image_path = data.get('primaryImageSmall')
+                description = data.get('objectName')
+
+                if not all([title, culture, image_path]):
+                    print(f"   - Skipping {object_id}: Missing essential data.")
+                    continue # Skips to the next iteration of the loop
+
+                # Insert Provenance (same as Day 3)
+                cursor.execute("SELECT ProvenanceID FROM Provenances WHERE Name = ?", (culture,))
+                result = cursor.fetchone()
+                if result:
+                    provenance_id = result[0]
+                else:
+                    cursor.execute("INSERT INTO Provenances (Name) VALUES (?)", (culture,))
+                    provenance_id = cursor.lastrowid
+                
+                # Insert Artifact (same as Day 3)
+                cursor.execute("""
+                    INSERT OR IGNORE INTO Artifacts (Title, ObjectType, ProvenanceID, CreationDate, ImageFilePath, Description)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (title, description, provenance_id, creation_date, image_path, "Fetched from The Met API"))
+                
+                print(f"   - Success! Saved '{title}' to the database.")
+
+            except requests.exceptions.RequestException as e:
+                print(f"   - Error fetching object {object_id}: {e}")
+            
+            # New: Be polite to the API and wait a moment before the next request
+            time.sleep(0.1) # Wait for 0.1 seconds
+            
+        # 4. Commit all changes and close the connection (once, after the loop)
         conn.commit()
         conn.close()
-        
-        print(f"✅ Success! Artifact '{title}' has been saved to the database.")
+        print("\n✅ Bulk ingestion complete.")
 
 except requests.exceptions.RequestException as e:
-    print(f"\n❌ An error occurred during the request: {e}")
+    print(f"\n❌ An error occurred during the initial search: {e}")
 except sqlite3.Error as e:
     print(f"\n❌ A database error occurred: {e}")
