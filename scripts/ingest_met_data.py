@@ -1,42 +1,64 @@
 # Import the necessary libraries
-import requests  # For making HTTP requests
-import json      # For pretty-printing the full response (optional)
+import requests
+import sqlite3 # New: Import the SQLite library
 
 # --- CONFIGURATION ---
-# The ID of the specific object we want to fetch from The Met's collection
 OBJECT_ID = 466112
-# The base URL for The Met's Collection API for a single object
 API_URL = f"https://collectionapi.metmuseum.org/public/collection/v1/objects/{OBJECT_ID}"
+DB_FILE = "database/artifacts.db" # New: Add path to your database file
 
 # --- SCRIPT EXECUTION ---
 print(f"Attempting to fetch data for object ID: {OBJECT_ID}...")
-print(f"URL: {API_URL}")
-
 try:
-    # 1. Make the API request
-    # This sends a GET request to the specified URL and waits for a response.
+    # 1. Make the API request (same as Day 2)
     response = requests.get(API_URL)
-
-    # This line will automatically raise an error if the request failed (e.g., 404 Not Found)
     response.raise_for_status()
-
-    print("\n✅ Success! API request was successful.")
-
-    # 2. Parse the JSON response
-    # The API's response is in JSON format. We convert it into a Python dictionary.
     data = response.json()
+    print("✅ Success! API data fetched.")
 
-    # 3. Extract and display the key details
-    # We use the .get() method, which is a safe way to access dictionary keys.
-    # It returns None instead of an error if a key doesn't exist.
-    print("\n--- Artifact Details ---")
-    print(f"  Title: {data.get('title')}")
-    print(f"  Date: {data.get('objectDate')}")
-    print(f"  Culture: {data.get('culture')}")
-    print(f"  Medium: {data.get('medium')}")
-    print(f"  Image URL: {data.get('primaryImageSmall')}")
-    print("------------------------\n")
+    # 2. Extract the relevant data
+    title = data.get('title')
+    culture = data.get('culture')
+    creation_date = data.get('objectDate')
+    image_path = data.get('primaryImageSmall')
+    description = data.get('objectName') # Using objectName as a simple description
+    
+    # New: Don't proceed if essential data is missing
+    if not all([title, culture, image_path]):
+        print("❌ Missing essential data, skipping database insert.")
+    else:
+        # 3. Connect to the SQLite database
+        print("Connecting to the database...")
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
 
-# This block catches potential errors (like no internet connection or a bad URL)
+        # 4. Insert Provenance (Culture) if it doesn't exist
+        # We check if the culture is already in the Provenances table to avoid duplicates.
+        cursor.execute("SELECT ProvenanceID FROM Provenances WHERE Name = ?", (culture,))
+        result = cursor.fetchone()
+        
+        if result:
+            provenance_id = result[0]
+        else:
+            # If not found, insert it and get the new ID
+            cursor.execute("INSERT INTO Provenances (Name) VALUES (?)", (culture,))
+            provenance_id = cursor.lastrowid
+            print(f"   - Added new provenance: '{culture}' with ID: {provenance_id}")
+
+        # 5. Insert the Artifact data
+        # We use the provenance_id we just found or created.
+        cursor.execute("""
+            INSERT INTO Artifacts (Title, ObjectType, ProvenanceID, CreationDate, ImageFilePath, Description)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (title, description, provenance_id, creation_date, image_path, "Fetched from The Met API"))
+        
+        # 6. Commit changes and close the connection
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ Success! Artifact '{title}' has been saved to the database.")
+
 except requests.exceptions.RequestException as e:
     print(f"\n❌ An error occurred during the request: {e}")
+except sqlite3.Error as e:
+    print(f"\n❌ A database error occurred: {e}")
