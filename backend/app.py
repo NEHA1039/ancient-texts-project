@@ -16,7 +16,7 @@ def get_db_connection():
 def hello_world():
     return 'This is the backend server for the Ancient Texts Project!'
 
-# Endpoint to get all artifacts (from Day 7)
+# Endpoint to get all artifacts
 @app.route('/api/artifacts')
 def get_all_artifacts():
     conn = get_db_connection()
@@ -25,29 +25,55 @@ def get_all_artifacts():
     conn.close()
     return jsonify([dict(row) for row in artifacts])
 
-
-# New: Create the endpoint for a single artifact
-# The <int:artifact_id> part is a dynamic route. Flask captures the integer
-# from the URL and passes it as an argument to our function.
+# Endpoint for a single artifact
 @app.route('/api/artifacts/<int:artifact_id>')
 def get_artifact_by_id(artifact_id):
-    # 1. Get a database connection
     conn = get_db_connection()
-    
-    # 2. Execute a SQL query to get the artifact with the matching ID
-    # The '?' is a placeholder to prevent SQL injection attacks.
     artifact_cursor = conn.execute('SELECT * FROM Artifacts WHERE ArtifactID = ?', (artifact_id,))
-    artifact = artifact_cursor.fetchone() # fetchone() gets the first result
-    
-    # 3. Close the database connection
+    artifact = artifact_cursor.fetchone()
     conn.close()
     
-    # 4. If the artifact was not found, return an error (optional but good practice)
     if artifact is None:
         return jsonify({"error": "Artifact not found"}), 404
         
-    # 5. Convert the row to a dictionary and return as JSON
     return jsonify(dict(artifact))
+
+# --- Day 9 Code Starts Here ---
+
+# New: Create the endpoint to get a list of all texts
+@app.route('/api/texts')
+def get_all_texts():
+    conn = get_db_connection()
+    # We use a JOIN to include the author's name along with the work's details
+    texts_cursor = conn.execute("""
+        SELECT W.WorkID, W.EnglishTitle, A.FullName as AuthorName
+        FROM Works W
+        JOIN Authors A ON W.AuthorID = A.AuthorID
+    """)
+    texts = texts_cursor.fetchall()
+    conn.close()
+    return jsonify([dict(row) for row in texts])
+
+# New: Create the endpoint for a single text
+@app.route('/api/texts/<int:text_id>')
+def get_text_by_id(text_id):
+    conn = get_db_connection()
+    # We join with Authors again to get the author's name for the single text view
+    text_cursor = conn.execute("""
+        SELECT W.*, A.FullName as AuthorName
+        FROM Works W
+        JOIN Authors A ON W.AuthorID = A.AuthorID
+        WHERE W.WorkID = ?
+    """, (text_id,))
+    text = text_cursor.fetchone()
+    conn.close()
+    
+    if text is None:
+        return jsonify({"error": "Text not found"}), 404
+        
+    return jsonify(dict(text))
+
+# --- Day 9 Code Ends Here ---
 
 
 # Run the application
