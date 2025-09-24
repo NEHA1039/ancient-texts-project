@@ -38,13 +38,10 @@ def get_artifact_by_id(artifact_id):
         
     return jsonify(dict(artifact))
 
-# --- Day 9 Code Starts Here ---
-
-# New: Create the endpoint to get a list of all texts
+# Endpoint to get a list of all texts
 @app.route('/api/texts')
 def get_all_texts():
     conn = get_db_connection()
-    # We use a JOIN to include the author's name along with the work's details
     texts_cursor = conn.execute("""
         SELECT W.WorkID, W.EnglishTitle, A.FullName as AuthorName
         FROM Works W
@@ -54,11 +51,10 @@ def get_all_texts():
     conn.close()
     return jsonify([dict(row) for row in texts])
 
-# New: Create the endpoint for a single text
+# Endpoint for a single text
 @app.route('/api/texts/<int:text_id>')
 def get_text_by_id(text_id):
     conn = get_db_connection()
-    # We join with Authors again to get the author's name for the single text view
     text_cursor = conn.execute("""
         SELECT W.*, A.FullName as AuthorName
         FROM Works W
@@ -73,7 +69,24 @@ def get_text_by_id(text_id):
         
     return jsonify(dict(text))
 
-# --- Day 9 Code Ends Here ---
+# --- Day 10 Code Starts Here ---
+
+# New: Create the endpoint to get all artifacts linked to a text
+@app.route('/api/texts/<int:text_id>/artifacts')
+def get_artifacts_for_text(text_id):
+    conn = get_db_connection()
+    # This query uses two JOINs to link Works -> Cross_References -> Artifacts
+    artifacts_cursor = conn.execute("""
+        SELECT A.* FROM Artifacts A
+        JOIN Cross_References CR ON A.ArtifactID = CR.ArtifactID
+        WHERE CR.WorkID = ?
+    """, (text_id,))
+    artifacts = artifacts_cursor.fetchall()
+    conn.close()
+    
+    return jsonify([dict(row) for row in artifacts])
+
+# --- Day 10 Code Ends Here ---
 
 
 # Run the application
